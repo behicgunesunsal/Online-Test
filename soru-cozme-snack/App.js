@@ -107,9 +107,10 @@ export default function App() {
   }, [questions]);
 
   // Active quiz session
-  const [selectedCategory, setSelectedCategory] = useState(null); // 'topics' | 'exams'
+  const [selectedCategory, setSelectedCategory] = useState(null); // legacy: not used for combined screen
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [selectedExamId, setSelectedExamId] = useState(null);
+  const [selectedExamSection, setSelectedExamSection] = useState(null);
   const [playQuestions, setPlayQuestions] = useState([]);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState(null);
@@ -158,6 +159,7 @@ export default function App() {
     setSelectedCategory(null);
     setSelectedTopic(null);
     setSelectedExamId(null);
+    setSelectedExamSection(null);
     setPlayQuestions([]);
     setIndex(0);
     setSelected(null);
@@ -178,8 +180,21 @@ export default function App() {
   };
 
   const startExam = (examId) => {
+    // First choose section screen
     setSelectedExamId(examId);
-    const filtered = questions.filter((qq) => qq.examId === examId);
+    setSelectedExamSection(null);
+    setPlayQuestions([]);
+    setIndex(0);
+    setSelected(null);
+    setScore(0);
+    setFinished(false);
+  };
+
+  const runExam = (examId, section = null) => {
+    const filteredAll = questions.filter((qq) => qq.examId === examId);
+    const filtered = section ? filteredAll.filter((qq) => qq.section === section) : filteredAll;
+    setSelectedExamId(examId);
+    setSelectedExamSection(section);
     setPlayQuestions(shuffle(filtered));
     setIndex(0);
     setSelected(null);
@@ -229,11 +244,13 @@ export default function App() {
   };
 
   const handleRestart = () => {
-    if (selectedCategory === 'topics' && selectedTopic) {
+    if (selectedTopic) {
       const filtered = questions.filter((qq) => qq.topic === selectedTopic);
       setPlayQuestions(shuffle(filtered));
-    } else if (selectedCategory === 'exams' && selectedExamId) {
-      const filtered = questions.filter((qq) => qq.examId === selectedExamId);
+    } else if (selectedExamId) {
+      const filtered = questions
+        .filter((qq) => qq.examId === selectedExamId)
+        .filter((qq) => (selectedExamSection ? qq.section === selectedExamSection : true));
       setPlayQuestions(shuffle(filtered));
     } else {
       setPlayQuestions([]);
@@ -359,72 +376,66 @@ export default function App() {
     );
   }
 
-  // USER: Category selection and then topic/exam selection
-  if (user.role === 'user' && !selectedCategory) {
+  // USER: Unified selection screen (Ana Konular + Deneme Sınavları)
+  if (user.role === 'user' && !selectedTopic && !selectedExamId && playQuestions.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.topBar}>
-          <Text style={styles.appTitle}>Ne çözmek istersin?</Text>
+          <Text style={styles.appTitle}>SMMM</Text>
           <TouchableOpacity onPress={logout}><Text style={styles.link}>Çıkış</Text></TouchableOpacity>
         </View>
-        <View style={styles.card}>
-          <TouchableOpacity style={styles.bigBtn} onPress={() => setSelectedCategory('topics')}>
-            <Text style={styles.bigBtnText}>SMMM Ana Konular</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.bigBtn, { backgroundColor: '#2563EB' }]} onPress={() => setSelectedCategory('exams')}>
-            <Text style={[styles.bigBtnText, { color: '#fff' }]}>Deneme Sınavları</Text>
-          </TouchableOpacity>
-        </View>
+        <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Ana Konular</Text>
+            {topics.length === 0 ? (
+              <Text style={styles.listSub}>Konu yok. Admin soru eklemeli.</Text>
+            ) : (
+              topics.map((t) => (
+                <TouchableOpacity key={t} style={styles.topicBtn} onPress={() => startTopic(t)}>
+                  <Text style={styles.topicBtnText}>{t}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+          <View style={[styles.card, { marginTop: 16 }]}>
+            <Text style={styles.sectionTitle}>Deneme Sınavları</Text>
+            {exams.length === 0 ? (
+              <Text style={styles.listSub}>Deneme yok. Admin eklemeli.</Text>
+            ) : (
+              exams.map((e) => (
+                <TouchableOpacity key={e.examId} style={styles.examBtn} onPress={() => startExam(e.examId)}>
+                  <Text style={styles.listTitle}>{e.title}</Text>
+                  <Text style={styles.listSub}>{e.sections.join(', ')} • {e.count} soru</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
 
-  if (user.role === 'user' && selectedCategory === 'topics' && !selectedTopic) {
+  // Exam section selection
+  if (user.role === 'user' && selectedExamId && playQuestions.length === 0) {
+    const examMeta = exams.find((e) => e.examId === selectedExamId);
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.topBar}>
-          <Text style={styles.appTitle}>Ana Konular</Text>
+          <Text style={styles.appTitle}>{examMeta?.title || 'Deneme'}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <TouchableOpacity onPress={() => setSelectedCategory(null)}><Text style={styles.link}>Geri</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setSelectedExamId(null)}><Text style={styles.link}>Geri</Text></TouchableOpacity>
             <TouchableOpacity onPress={logout} style={{ marginLeft: 12 }}><Text style={styles.link}>Çıkış</Text></TouchableOpacity>
           </View>
         </View>
         <View style={styles.card}>
-          {topics.length === 0 ? (
-            <Text style={styles.listSub}>Konu yok. Admin soru eklemeli.</Text>
-          ) : (
-            topics.map((t) => (
-              <TouchableOpacity key={t} style={styles.topicBtn} onPress={() => startTopic(t)}>
-                <Text style={styles.topicBtnText}>{t}</Text>
-              </TouchableOpacity>
-            ))
-          )}
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (user.role === 'user' && selectedCategory === 'exams' && !selectedExamId) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.topBar}>
-          <Text style={styles.appTitle}>Deneme Sınavları</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <TouchableOpacity onPress={() => setSelectedCategory(null)}><Text style={styles.link}>Geri</Text></TouchableOpacity>
-            <TouchableOpacity onPress={logout} style={{ marginLeft: 12 }}><Text style={styles.link}>Çıkış</Text></TouchableOpacity>
-          </View>
-        </View>
-        <View style={styles.card}>
-          {exams.length === 0 ? (
-            <Text style={styles.listSub}>Deneme yok. Admin eklemeli.</Text>
-          ) : (
-            exams.map((e) => (
-              <TouchableOpacity key={e.examId} style={styles.examBtn} onPress={() => startExam(e.examId)}>
-                <Text style={styles.listTitle}>{e.title}</Text>
-                <Text style={styles.listSub}>{e.sections.join(', ')} • {e.count} soru</Text>
-              </TouchableOpacity>
-            ))
-          )}
+          <TouchableOpacity style={styles.topicBtn} onPress={() => runExam(selectedExamId, null)}>
+            <Text style={styles.topicBtnText}>Tüm Bölümler</Text>
+          </TouchableOpacity>
+          {examMeta?.sections?.map((sec) => (
+            <TouchableOpacity key={sec} style={styles.topicBtn} onPress={() => runExam(selectedExamId, sec)}>
+              <Text style={styles.topicBtnText}>{sec}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
       </SafeAreaView>
     );
@@ -669,7 +680,7 @@ export default function App() {
           </View>
           <Text style={styles.progressText}>
             {selectedTopic ? `${selectedTopic} • ` : ''}
-            {selectedExamId && q?.examTitle ? `${q.examTitle}${q.section ? ' • ' + q.section : ''} • ` : ''}
+            {selectedExamId && q?.examTitle ? `${q.examTitle}${selectedExamSection ? ' • ' + selectedExamSection : q.section ? ' • ' + q.section : ''} • ` : ''}
             Soru {index + 1} / {playQuestions.length}
           </Text>
         </>
