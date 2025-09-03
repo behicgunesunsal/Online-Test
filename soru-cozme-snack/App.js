@@ -35,6 +35,40 @@ const INITIAL_QUESTIONS = [
     explanation: 'length özelliği kullanılır.',
     topic: 'JavaScript',
   },
+  // Deneme sınavı örnekleri (aynı sınav içinde farklı bölümler)
+  {
+    id: 'e1_q1',
+    kind: 'exam',
+    examId: 'deneme-1',
+    examTitle: 'Deneme 1',
+    section: 'Matematik',
+    text: '3 × 4 = ?',
+    choices: ['6', '7', '12', '14'],
+    correctIndex: 2,
+    explanation: '3 çarpı 4 = 12',
+  },
+  {
+    id: 'e1_q2',
+    kind: 'exam',
+    examId: 'deneme-1',
+    examTitle: 'Deneme 1',
+    section: 'Fizik',
+    text: 'Işık hızı yaklaşık olarak kaçtır?',
+    choices: ['3×10^8 m/s', '3×10^6 m/s', '3×10^5 km/s', '3000 km/s'],
+    correctIndex: 0,
+    explanation: 'Yaklaşık 3×10^8 m/s',
+  },
+  {
+    id: 'e1_q3',
+    kind: 'exam',
+    examId: 'deneme-1',
+    examTitle: 'Deneme 1',
+    section: 'Kimya',
+    text: 'Su molekülünün kimyasal formülü nedir?',
+    choices: ['H2', 'O2', 'CO2', 'H2O'],
+    correctIndex: 3,
+    explanation: 'Su, H2O’dur.',
+  },
 ];
 
 function shuffle(arr) {
@@ -56,12 +90,26 @@ export default function App() {
   // Master questions repository
   const [questions, setQuestions] = useState(INITIAL_QUESTIONS);
   const topics = useMemo(
-    () => Array.from(new Set(questions.map((q) => q.topic).filter(Boolean))),
+    () => Array.from(new Set(questions.filter(q => q.topic).map((q) => q.topic))),
     [questions]
   );
+  const exams = useMemo(() => {
+    const map = new Map();
+    questions.forEach((q) => {
+      if (q.examId) {
+        const curr = map.get(q.examId) || { examId: q.examId, title: q.examTitle || q.examId, count: 0, sections: new Set() };
+        curr.count += 1;
+        if (q.section) curr.sections.add(q.section);
+        map.set(q.examId, curr);
+      }
+    });
+    return Array.from(map.values()).map(e => ({ ...e, sections: Array.from(e.sections) }));
+  }, [questions]);
 
   // Active quiz session
+  const [selectedCategory, setSelectedCategory] = useState(null); // 'topics' | 'exams'
   const [selectedTopic, setSelectedTopic] = useState(null);
+  const [selectedExamId, setSelectedExamId] = useState(null);
   const [playQuestions, setPlayQuestions] = useState([]);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState(null);
@@ -107,7 +155,9 @@ export default function App() {
 
   const logout = () => {
     setUser(null);
+    setSelectedCategory(null);
     setSelectedTopic(null);
+    setSelectedExamId(null);
     setPlayQuestions([]);
     setIndex(0);
     setSelected(null);
@@ -127,12 +177,23 @@ export default function App() {
     setTab('quiz');
   };
 
+  const startExam = (examId) => {
+    setSelectedExamId(examId);
+    const filtered = questions.filter((qq) => qq.examId === examId);
+    setPlayQuestions(shuffle(filtered));
+    setIndex(0);
+    setSelected(null);
+    setScore(0);
+    setFinished(false);
+    setTab('quiz');
+  };
+
   // Quiz handlers
   const updateStatsOnAnswer = (correct) => {
     if (!currentUserKey) return;
     setStats((prev) => {
       const s = prev[currentUserKey] || { total: 0, correct: 0, byTopic: {} };
-      const topicKey = q?.topic || 'Genel';
+      const topicKey = q?.topic || (q?.examTitle ? `Deneme/${q.examTitle}/${q.section || 'Genel'}` : 'Genel');
       const t = s.byTopic[topicKey] || { total: 0, correct: 0 };
       const ns = {
         ...s,
@@ -168,8 +229,11 @@ export default function App() {
   };
 
   const handleRestart = () => {
-    if (selectedTopic) {
+    if (selectedCategory === 'topics' && selectedTopic) {
       const filtered = questions.filter((qq) => qq.topic === selectedTopic);
+      setPlayQuestions(shuffle(filtered));
+    } else if (selectedCategory === 'exams' && selectedExamId) {
+      const filtered = questions.filter((qq) => qq.examId === selectedExamId);
       setPlayQuestions(shuffle(filtered));
     } else {
       setPlayQuestions([]);
@@ -193,13 +257,24 @@ export default function App() {
     });
   };
 
+  const [formKind, setFormKind] = useState('topic'); // 'topic' | 'exam'
+  const [formExamId, setFormExamId] = useState('');
+  const [formExamTitle, setFormExamTitle] = useState('');
+  const [formSection, setFormSection] = useState('');
+
   const validateForm = () => {
     if (!formText.trim()) return 'Soru metni gerekli';
     const cleanChoices = formChoices.map((c) => c.trim());
     if (cleanChoices.some((c) => !c)) return 'Tüm şıkları doldurun';
     if (formCorrect < 0 || formCorrect >= cleanChoices.length) return 'Doğru şık indeksi hatalı';
     if (formImageUrl && !/^https?:\/\//i.test(formImageUrl.trim())) return 'Görsel URL http(s) olmalı';
-    if (!formTopic.trim()) return 'Konu gerekli';
+    if (formKind === 'topic') {
+      if (!formTopic.trim()) return 'Konu gerekli';
+    } else {
+      if (!formExamId.trim()) return 'Deneme ID gerekli';
+      if (!formExamTitle.trim()) return 'Deneme başlığı gerekli';
+      if (!formSection.trim()) return 'Bölüm (ör. Matematik) gerekli';
+    }
     return null;
   };
 
@@ -209,15 +284,17 @@ export default function App() {
       alert(err);
       return;
     }
-    const newQ = {
+    const base = {
       id: `q_${Date.now()}`,
       text: formText.trim(),
       choices: formChoices.map((c) => c.trim()),
       correctIndex: formCorrect,
       explanation: formExplanation.trim(),
       image: formImageUrl.trim() || undefined,
-      topic: formTopic.trim(),
     };
+    const newQ = formKind === 'topic'
+      ? { ...base, topic: formTopic.trim() }
+      : { ...base, kind: 'exam', examId: formExamId.trim(), examTitle: formExamTitle.trim(), section: formSection.trim() };
     setQuestions((prev) => [...prev, newQ]);
     setFormText('');
     setFormChoices(['', '', '', '']);
@@ -225,6 +302,9 @@ export default function App() {
     setFormExplanation('');
     setFormImageUrl('');
     setFormTopic('');
+    setFormExamId('');
+    setFormExamTitle('');
+    setFormSection('');
     alert('Soru eklendi');
   };
 
@@ -279,22 +359,69 @@ export default function App() {
     );
   }
 
-  // USER: Topic selection before quiz
-  if (user.role === 'user' && !selectedTopic) {
+  // USER: Category selection and then topic/exam selection
+  if (user.role === 'user' && !selectedCategory) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.topBar}>
-          <Text style={styles.appTitle}>Konu Seç</Text>
+          <Text style={styles.appTitle}>Ne çözmek istersin?</Text>
           <TouchableOpacity onPress={logout}><Text style={styles.link}>Çıkış</Text></TouchableOpacity>
         </View>
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Ana Konular</Text>
+          <TouchableOpacity style={styles.bigBtn} onPress={() => setSelectedCategory('topics')}>
+            <Text style={styles.bigBtnText}>SMMM Ana Konular</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.bigBtn, { backgroundColor: '#2563EB' }]} onPress={() => setSelectedCategory('exams')}>
+            <Text style={[styles.bigBtnText, { color: '#fff' }]}>Deneme Sınavları</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (user.role === 'user' && selectedCategory === 'topics' && !selectedTopic) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.topBar}>
+          <Text style={styles.appTitle}>Ana Konular</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity onPress={() => setSelectedCategory(null)}><Text style={styles.link}>Geri</Text></TouchableOpacity>
+            <TouchableOpacity onPress={logout} style={{ marginLeft: 12 }}><Text style={styles.link}>Çıkış</Text></TouchableOpacity>
+          </View>
+        </View>
+        <View style={styles.card}>
           {topics.length === 0 ? (
             <Text style={styles.listSub}>Konu yok. Admin soru eklemeli.</Text>
           ) : (
             topics.map((t) => (
               <TouchableOpacity key={t} style={styles.topicBtn} onPress={() => startTopic(t)}>
                 <Text style={styles.topicBtnText}>{t}</Text>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (user.role === 'user' && selectedCategory === 'exams' && !selectedExamId) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.topBar}>
+          <Text style={styles.appTitle}>Deneme Sınavları</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity onPress={() => setSelectedCategory(null)}><Text style={styles.link}>Geri</Text></TouchableOpacity>
+            <TouchableOpacity onPress={logout} style={{ marginLeft: 12 }}><Text style={styles.link}>Çıkış</Text></TouchableOpacity>
+          </View>
+        </View>
+        <View style={styles.card}>
+          {exams.length === 0 ? (
+            <Text style={styles.listSub}>Deneme yok. Admin eklemeli.</Text>
+          ) : (
+            exams.map((e) => (
+              <TouchableOpacity key={e.examId} style={styles.examBtn} onPress={() => startExam(e.examId)}>
+                <Text style={styles.listTitle}>{e.title}</Text>
+                <Text style={styles.listSub}>{e.sections.join(', ')} • {e.count} soru</Text>
               </TouchableOpacity>
             ))
           )}
@@ -357,6 +484,14 @@ export default function App() {
         <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Yeni Soru Ekle</Text>
+            <View style={[styles.modeSwitch, { alignSelf: 'flex-start', marginBottom: 8 }]}>
+              <TouchableOpacity onPress={() => setFormKind('topic')} style={[styles.modeBtn, formKind === 'topic' && styles.modeBtnActive]}>
+                <Text style={formKind === 'topic' ? styles.modeBtnTextActive : styles.modeBtnText}>Konu</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setFormKind('exam')} style={[styles.modeBtn, formKind === 'exam' && styles.modeBtnActive]}>
+                <Text style={formKind === 'exam' ? styles.modeBtnTextActive : styles.modeBtnText}>Deneme</Text>
+              </TouchableOpacity>
+            </View>
             <Text style={styles.inputLabel}>Soru Metni</Text>
             <TextInput
               placeholder="Soru metni"
@@ -405,13 +540,42 @@ export default function App() {
               <Image source={{ uri: formImageUrl }} style={styles.previewImage} />
             )}
 
-            <Text style={styles.inputLabel}>Konu</Text>
-            <TextInput
-              placeholder="Örn. Matematik"
-              value={formTopic}
-              onChangeText={setFormTopic}
-              style={styles.input}
-            />
+            {formKind === 'topic' ? (
+              <>
+                <Text style={styles.inputLabel}>Konu</Text>
+                <TextInput
+                  placeholder="Örn. Matematik"
+                  value={formTopic}
+                  onChangeText={setFormTopic}
+                  style={styles.input}
+                />
+              </>
+            ) : (
+              <>
+                <Text style={styles.inputLabel}>Deneme ID</Text>
+                <TextInput
+                  placeholder="örn. deneme-1"
+                  value={formExamId}
+                  onChangeText={setFormExamId}
+                  style={styles.input}
+                  autoCapitalize="none"
+                />
+                <Text style={styles.inputLabel}>Deneme Başlığı</Text>
+                <TextInput
+                  placeholder="örn. Deneme 1"
+                  value={formExamTitle}
+                  onChangeText={setFormExamTitle}
+                  style={styles.input}
+                />
+                <Text style={styles.inputLabel}>Bölüm</Text>
+                <TextInput
+                  placeholder="örn. Matematik"
+                  value={formSection}
+                  onChangeText={setFormSection}
+                  style={styles.input}
+                />
+              </>
+            )}
 
             <TouchableOpacity style={styles.primaryBtn} onPress={handleAddQuestion}>
               <Text style={styles.primaryBtnText}>Soruyu Ekle</Text>
@@ -423,7 +587,9 @@ export default function App() {
             {questions.map((item, i) => (
               <View key={item.id} style={styles.listRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.listTitle}>{i + 1}. [{item.topic}] {item.text}</Text>
+                  <Text style={styles.listTitle}>
+                    {i + 1}. {item.examId ? `[Deneme: ${item.examTitle}${item.section ? ' • ' + item.section : ''}]` : `[${item.topic}]`} {item.text}
+                  </Text>
                   {item.image ? (
                     <Text style={styles.listSub}>[Görsel] {item.image}</Text>
                   ) : null}
@@ -502,7 +668,9 @@ export default function App() {
             <View style={[styles.progressFill, { width: `${progress}%` }]} />
           </View>
           <Text style={styles.progressText}>
-            {selectedTopic ? `${selectedTopic} • ` : ''}Soru {index + 1} / {playQuestions.length}
+            {selectedTopic ? `${selectedTopic} • ` : ''}
+            {selectedExamId && q?.examTitle ? `${q.examTitle}${q.section ? ' • ' + q.section : ''} • ` : ''}
+            Soru {index + 1} / {playQuestions.length}
           </Text>
         </>
       ) : (
@@ -696,4 +864,3 @@ const styles = StyleSheet.create({
   topicBtn: { backgroundColor: '#111827', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, marginTop: 8 },
   topicBtnText: { color: '#fff', fontWeight: '700' },
 });
-
