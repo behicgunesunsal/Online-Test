@@ -119,11 +119,16 @@ export default function App() {
   const [selectedExamId, setSelectedExamId] = useState(null);
   const [selectedMainCategory, setSelectedMainCategory] = useState(null);
   const [selectedExamSection, setSelectedExamSection] = useState(null);
+  const [selectedExamTimed, setSelectedExamTimed] = useState(false);
+  const [selectedExamMinutes, setSelectedExamMinutes] = useState('30');
   const [playQuestions, setPlayQuestions] = useState([]);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState(null);
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
+  const [attemptRecorded, setAttemptRecorded] = useState(false);
+  const [startedAt, setStartedAt] = useState(null);
+  const [timeLeftSec, setTimeLeftSec] = useState(null);
 
   // Tabs after login
   const [tab, setTab] = useState('quiz'); // 'quiz' | 'admin' | 'stats'
@@ -289,8 +294,34 @@ export default function App() {
     setSelected(null);
     setScore(0);
     setFinished(false);
+    setAttemptRecorded(false);
+    setStartedAt(Date.now());
+    if (selectedExamTimed) {
+      const secs = Math.max(1, parseInt(selectedExamMinutes || '0', 10)) * 60;
+      setTimeLeftSec(secs);
+    } else {
+      setTimeLeftSec(null);
+    }
     setTab('quiz');
   };
+
+  // Countdown timer effect for timed exams
+  useEffect(() => {
+    if (!playQuestions.length || !selectedExamTimed || finished) return;
+    if (timeLeftSec == null) return;
+    const t = setInterval(() => {
+      setTimeLeftSec((s) => {
+        if (s == null) return s;
+        if (s <= 1) {
+          clearInterval(t);
+          setFinished(true);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [playQuestions.length, selectedExamTimed, finished, timeLeftSec]);
 
   // Quiz handlers
   const updateStatsOnAnswer = (correct) => {
@@ -332,6 +363,29 @@ export default function App() {
     }
   };
 
+  // Record attempt once when finished
+  useEffect(() => {
+    if (!finished || attemptRecorded || !currentUserKey || !selectedExamId) return;
+    const durationSec = startedAt ? Math.max(1, Math.round((Date.now() - startedAt) / 1000)) : 0;
+    const key = `${selectedExamId}::${selectedExamSection || 'ALL'}`;
+    setStats((prev) => {
+      const s = prev[currentUserKey] || { total: 0, correct: 0, byTopic: {}, exams: {} };
+      const exams = s.exams || {};
+      const e = exams[key] || { attempts: 0, totalCorrect: 0, totalQuestions: 0, totalDurationSec: 0, label: '' };
+      const label = `${q?.examTitle || selectedExamId}${selectedExamSection ? ' • ' + selectedExamSection : ''}`;
+      const updated = {
+        ...e,
+        attempts: e.attempts + 1,
+        totalCorrect: e.totalCorrect + score,
+        totalQuestions: e.totalQuestions + playQuestions.length,
+        totalDurationSec: e.totalDurationSec + durationSec,
+        label,
+      };
+      return { ...prev, [currentUserKey]: { ...s, exams: { ...exams, [key]: updated } } };
+    });
+    setAttemptRecorded(true);
+  }, [finished]);
+
   const handleRestart = () => {
     if (selectedExamId) {
       const filtered = questions
@@ -345,6 +399,28 @@ export default function App() {
     setSelected(null);
     setScore(0);
     setFinished(false);
+    setAttemptRecorded(false);
+    setStartedAt(Date.now());
+    if (selectedExamTimed) {
+      const secs = Math.max(1, parseInt(selectedExamMinutes || '0', 10)) * 60;
+      setTimeLeftSec(secs);
+    } else {
+      setTimeLeftSec(null);
+    }
+  };
+
+  const goBackToExamList = () => {
+    setPlayQuestions([]);
+    setIndex(0);
+    setSelected(null);
+    setScore(0);
+    setFinished(false);
+    setAttemptRecorded(false);
+    setStartedAt(null);
+    setTimeLeftSec(null);
+    // stay in same main category, just clear selected exam
+    setSelectedExamId(null);
+    setTab('quiz');
   };
 
   const handleDeleteQuestion = (qid) => {
@@ -571,6 +647,11 @@ export default function App() {
   // Exam section selection
   if (user.role === 'user' && selectedExamId && playQuestions.length === 0) {
     const examMeta = exams.find((e) => e.examId === selectedExamId);
+    const examQs = questions.filter((qq) => qq.examId === selectedExamId);
+    const sectionCounts = (examMeta?.sections || []).reduce((acc, sec) => {
+      acc[sec] = examQs.filter((q) => q.section === sec).length;
+      return acc;
+    }, {});
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.topBar}>
@@ -581,14 +662,42 @@ export default function App() {
           </View>
         </View>
         <View style={styles.card}>
-          <TouchableOpacity style={styles.topicBtn} onPress={() => runExam(selectedExamId, null)}>
-            <Text style={styles.topicBtnText}>Tüm Bölümler</Text>
-          </TouchableOpacity>
-          {examMeta?.sections?.map((sec) => (
-            <TouchableOpacity key={sec} style={styles.topicBtn} onPress={() => runExam(selectedExamId, sec)}>
-              <Text style={styles.topicBtnText}>{sec}</Text>
+          <Text style={styles.sectionTitle}>Süre Seçimi</Text>
+          <View style={styles.modeSwitch}>
+            <TouchableOpacity onPress={() => setSelectedExamTimed(false)} style={[styles.modeBtn, !selectedExamTimed && styles.modeBtnActive]}>
+              <Text style={!selectedExamTimed ? styles.modeBtnTextActive : styles.modeBtnText}>Süresiz</Text>
             </TouchableOpacity>
-          ))}
+            <TouchableOpacity onPress={() => setSelectedExamTimed(true)} style={[styles.modeBtn, selectedExamTimed && styles.modeBtnActive]}>
+              <Text style={selectedExamTimed ? styles.modeBtnTextActive : styles.modeBtnText}>Süreli</Text>
+            </TouchableOpacity>
+          </View>
+          {selectedExamTimed && (
+            <View style={{ marginTop: 8 }}>
+              <Text style={styles.inputLabel}>Süre (dakika)</Text>
+              <TextInput
+                placeholder="örn. 30"
+                value={selectedExamMinutes}
+                onChangeText={setSelectedExamMinutes}
+                keyboardType="number-pad"
+                style={styles.input}
+              />
+            </View>
+          )}
+          <TouchableOpacity style={styles.primaryBtn} onPress={() => runExam(selectedExamId, null)}>
+            <Text style={styles.primaryBtnText}>Sınava Başla (Tüm Bölümler)</Text>
+          </TouchableOpacity>
+
+          {examMeta?.sections?.length ? (
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.sectionTitle}>Bölümler</Text>
+              {examMeta.sections.map((sec) => (
+                <View key={sec} style={styles.listRow}>
+                  <Text style={styles.listTitle}>{sec}</Text>
+                  <Text style={styles.listSub}>{sectionCounts[sec] || 0} soru</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </View>
       </SafeAreaView>
     );
@@ -632,9 +741,15 @@ export default function App() {
           <Text style={styles.resultText}>
             Başarı oranı: {Math.round((score / playQuestions.length) * 100)}%
           </Text>
+          {selectedExamTimed && (
+            <Text style={styles.listSub}>Kalan süre: {timeLeftSec != null ? 0 : ''} </Text>
+          )}
         </View>
         <TouchableOpacity style={styles.primaryBtn} onPress={handleRestart}>
           <Text style={styles.primaryBtnText}>Baştan Başla</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.secondaryBtn, { alignSelf: 'center', marginTop: 8 }]} onPress={goBackToExamList}>
+          <Text style={styles.secondaryBtnText}>Sınavlara Dön</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
@@ -864,7 +979,7 @@ export default function App() {
 
   // STATS panel
   if (tab === 'stats') {
-    const s = stats[currentUserKey] || { total: 0, correct: 0, byTopic: {} };
+    const s = stats[currentUserKey] || { total: 0, correct: 0, byTopic: {}, exams: {} };
     const ratio = s.total ? Math.round((s.correct / s.total) * 100) : 0;
     return (
       <SafeAreaView style={styles.container}>
@@ -890,6 +1005,25 @@ export default function App() {
                 </View>
               );
             })
+          )}
+        </View>
+        <View style={[styles.card, { marginTop: 16 }]}>
+          <Text style={styles.sectionTitle}>Sınav Denemeleri</Text>
+          {s.exams && Object.keys(s.exams).length > 0 ? (
+            Object.entries(s.exams).map(([key, e]) => {
+              const avgScore = e.totalQuestions ? Math.round((e.totalCorrect / e.totalQuestions) * 100) : 0;
+              const avgDuration = e.attempts ? Math.round(e.totalDurationSec / e.attempts) : 0;
+              const mm = Math.floor(avgDuration / 60);
+              const ss = String(avgDuration % 60).padStart(2, '0');
+              return (
+                <View key={key} style={styles.listRow}>
+                  <Text style={styles.listTitle}>{e.label || key}</Text>
+                  <Text style={styles.listSub}>Deneme: {e.attempts} • Ortalama: %{avgScore} • Süre: {mm}:{ss}</Text>
+                </View>
+              );
+            })
+          ) : (
+            <Text style={styles.listSub}>Henüz deneme yok.</Text>
           )}
         </View>
       </SafeAreaView>
@@ -928,6 +1062,9 @@ export default function App() {
             {selectedExamId && q?.examTitle ? `${q.examTitle}${selectedExamSection ? ' • ' + selectedExamSection : q.section ? ' • ' + q.section : ''} • ` : ''}
             Soru {index + 1} / {playQuestions.length}
           </Text>
+          {selectedExamTimed && timeLeftSec != null && (
+            <Text style={styles.progressText}>Kalan Süre: {Math.floor(timeLeftSec / 60)}:{String(timeLeftSec % 60).padStart(2, '0')}</Text>
+          )}
         </>
       ) : (
         <Text style={[styles.progressText, { marginBottom: 8 }]}>Henüz soru yok veya konu seçilmedi.</Text>
