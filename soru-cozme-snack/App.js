@@ -17,6 +17,7 @@ const INITIAL_QUESTIONS = [
     kind: 'exam',
     examId: 'deneme-1',
     examTitle: 'Deneme 1',
+    mainCategory: 'Yeterlilik',
     section: 'Matematik',
     text: '3 × 4 = ?',
     choices: ['6', '7', '12', '14'],
@@ -28,6 +29,7 @@ const INITIAL_QUESTIONS = [
     kind: 'exam',
     examId: 'deneme-1',
     examTitle: 'Deneme 1',
+    mainCategory: 'Yeterlilik',
     section: 'Fizik',
     text: 'Işık hızı yaklaşık olarak kaçtır?',
     choices: ['3×10^8 m/s', '3×10^6 m/s', '3×10^5 km/s', '3000 km/s'],
@@ -39,6 +41,7 @@ const INITIAL_QUESTIONS = [
     kind: 'exam',
     examId: 'deneme-1',
     examTitle: 'Deneme 1',
+    mainCategory: 'Yeterlilik',
     section: 'Kimya',
     text: 'Su molekülünün kimyasal formülü nedir?',
     choices: ['H2', 'O2', 'CO2', 'H2O'],
@@ -78,10 +81,39 @@ export default function App() {
     return Array.from(map.values()).map(e => ({ ...e, sections: Array.from(e.sections) }));
   }, [questions]);
 
+  const examsByCategory = useMemo(() => {
+    const examAgg = new Map();
+    questions.forEach((q) => {
+      if (!q.examId) return;
+      const cat = q.mainCategory || 'Genel';
+      const key = `${cat}||${q.examId}`;
+      const curr = examAgg.get(key) || {
+        mainCategory: cat,
+        examId: q.examId,
+        title: q.examTitle || q.examId,
+        count: 0,
+        sections: new Set(),
+      };
+      curr.count += 1;
+      if (q.section) curr.sections.add(q.section);
+      examAgg.set(key, curr);
+    });
+    const byCat = new Map();
+    Array.from(examAgg.values()).forEach((e) => {
+      const list = byCat.get(e.mainCategory) || [];
+      list.push({ ...e, sections: Array.from(e.sections) });
+      byCat.set(e.mainCategory, list);
+    });
+    return byCat;
+  }, [questions]);
+
+  const mainCategories = useMemo(() => Array.from(examsByCategory.keys()), [examsByCategory]);
+
   // Active quiz session
   const [selectedCategory, setSelectedCategory] = useState(null); // legacy
   const [selectedTopic, setSelectedTopic] = useState(null); // legacy
   const [selectedExamId, setSelectedExamId] = useState(null);
+  const [selectedMainCategory, setSelectedMainCategory] = useState(null);
   const [selectedExamSection, setSelectedExamSection] = useState(null);
   const [playQuestions, setPlayQuestions] = useState([]);
   const [index, setIndex] = useState(0);
@@ -129,6 +161,7 @@ export default function App() {
     setUser(null);
     setSelectedCategory(null);
     setSelectedTopic(null);
+    setSelectedMainCategory(null);
     setSelectedExamId(null);
     setSelectedExamSection(null);
     setPlayQuestions([]);
@@ -170,7 +203,7 @@ export default function App() {
     if (!currentUserKey) return;
     setStats((prev) => {
       const s = prev[currentUserKey] || { total: 0, correct: 0, byTopic: {} };
-      const topicKey = q?.examTitle ? `Deneme/${q.examTitle}/${q.section || 'Genel'}` : 'Genel';
+      const topicKey = q?.examTitle ? `Deneme/${q.mainCategory || 'Genel'}/${q.examTitle}/${q.section || 'Genel'}` : 'Genel';
       const t = s.byTopic[topicKey] || { total: 0, correct: 0 };
       const ns = {
         ...s,
@@ -236,6 +269,7 @@ export default function App() {
   const [formExamId, setFormExamId] = useState('');
   const [formExamTitle, setFormExamTitle] = useState('');
   const [formSection, setFormSection] = useState('');
+  const [formMainCategory, setFormMainCategory] = useState('');
 
   const validateForm = () => {
     if (!formText.trim()) return 'Soru metni gerekli';
@@ -243,6 +277,7 @@ export default function App() {
     if (cleanChoices.some((c) => !c)) return 'Tüm şıkları doldurun';
     if (formCorrect < 0 || formCorrect >= cleanChoices.length) return 'Doğru şık indeksi hatalı';
     if (formImageUrl && !/^https?:\/\//i.test(formImageUrl.trim())) return 'Görsel URL http(s) olmalı';
+    if (!formMainCategory.trim()) return 'Ana konu gerekli';
     if (!formExamId.trim()) return 'Deneme ID gerekli';
     if (!formExamTitle.trim()) return 'Deneme başlığı gerekli';
     if (!formSection.trim()) return 'Bölüm (ör. Matematik) gerekli';
@@ -263,13 +298,14 @@ export default function App() {
       explanation: formExplanation.trim(),
       image: formImageUrl.trim() || undefined,
     };
-    const newQ = { ...base, kind: 'exam', examId: formExamId.trim(), examTitle: formExamTitle.trim(), section: formSection.trim() };
+    const newQ = { ...base, kind: 'exam', mainCategory: formMainCategory.trim(), examId: formExamId.trim(), examTitle: formExamTitle.trim(), section: formSection.trim() };
     setQuestions((prev) => [...prev, newQ]);
     setFormText('');
     setFormChoices(['', '', '', '']);
     setFormCorrect(0);
     setFormExplanation('');
     setFormImageUrl('');
+    setFormMainCategory('');
     setFormExamId('');
     setFormExamTitle('');
     setFormSection('');
@@ -327,20 +363,49 @@ export default function App() {
     );
   }
 
-  // USER: Unified selection screen (Ana Konular + Deneme Sınavları)
-  if (user.role === 'user' && !selectedExamId && playQuestions.length === 0) {
+  // USER: Ana Konu seçimi
+  if (user.role === 'user' && !selectedMainCategory && !selectedExamId && playQuestions.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.topBar}>
-          <Text style={styles.appTitle}>Deneme Sınavları</Text>
+          <Text style={styles.appTitle}>Ana Konular</Text>
           <TouchableOpacity onPress={logout}><Text style={styles.link}>Çıkış</Text></TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
           <View style={styles.card}>
-            {exams.length === 0 ? (
-              <Text style={styles.listSub}>Deneme yok. Admin eklemeli.</Text>
+            {mainCategories.length === 0 ? (
+              <Text style={styles.listSub}>Henüz ana konu yok. Admin soru eklemeli.</Text>
             ) : (
-              exams.map((e) => (
+              mainCategories.map((cat) => (
+                <TouchableOpacity key={cat} style={styles.topicBtn} onPress={() => setSelectedMainCategory(cat)}>
+                  <Text style={styles.topicBtnText}>{cat}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // USER: Seçili ana konuda denemeler
+  if (user.role === 'user' && selectedMainCategory && !selectedExamId && playQuestions.length === 0) {
+    const list = examsByCategory.get(selectedMainCategory) || [];
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.topBar}>
+          <Text style={styles.appTitle}>Deneme Sınavları — {selectedMainCategory}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity onPress={() => setSelectedMainCategory(null)}><Text style={styles.link}>Geri</Text></TouchableOpacity>
+            <TouchableOpacity onPress={logout} style={{ marginLeft: 12 }}><Text style={styles.link}>Çıkış</Text></TouchableOpacity>
+          </View>
+        </View>
+        <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+          <View style={styles.card}>
+            {list.length === 0 ? (
+              <Text style={styles.listSub}>Bu ana konuda deneme yok.</Text>
+            ) : (
+              list.map((e) => (
                 <TouchableOpacity key={e.examId} style={styles.examBtn} onPress={() => startExam(e.examId)}>
                   <Text style={styles.listTitle}>{e.title}</Text>
                   <Text style={styles.listSub}>{e.sections.join(', ')} • {e.count} soru</Text>
@@ -468,24 +533,32 @@ export default function App() {
               style={styles.input}
             />
 
-            <Text style={styles.inputLabel}>Görsel URL (opsiyonel)</Text>
-            <TextInput
-              placeholder="https://…"
-              value={formImageUrl}
-              onChangeText={setFormImageUrl}
-              style={styles.input}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {!!formImageUrl && /^https?:\/\//i.test(formImageUrl) && (
-              <Image source={{ uri: formImageUrl }} style={styles.previewImage} />
-            )}
+          <Text style={styles.inputLabel}>Görsel URL (opsiyonel)</Text>
+          <TextInput
+            placeholder="https://…"
+            value={formImageUrl}
+            onChangeText={setFormImageUrl}
+            style={styles.input}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {!!formImageUrl && /^https?:\/\//i.test(formImageUrl) && (
+            <Image source={{ uri: formImageUrl }} style={styles.previewImage} />
+          )}
 
-            <Text style={styles.inputLabel}>Deneme ID</Text>
-            <TextInput
-              placeholder="örn. deneme-1"
-              value={formExamId}
-              onChangeText={setFormExamId}
+          <Text style={styles.inputLabel}>Ana Konu</Text>
+          <TextInput
+            placeholder="Örn. Yeterlilik / SMMM / Hukuk"
+            value={formMainCategory}
+            onChangeText={setFormMainCategory}
+            style={styles.input}
+          />
+
+          <Text style={styles.inputLabel}>Deneme ID</Text>
+          <TextInput
+            placeholder="örn. deneme-1"
+            value={formExamId}
+            onChangeText={setFormExamId}
               style={styles.input}
               autoCapitalize="none"
             />
@@ -514,9 +587,7 @@ export default function App() {
             {questions.map((item, i) => (
               <View key={item.id} style={styles.listRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.listTitle}>
-                    {i + 1}. {item.examId ? `[Deneme: ${item.examTitle}${item.section ? ' • ' + item.section : ''}]` : `[${item.topic}]`} {item.text}
-                  </Text>
+                  <Text style={styles.listTitle}>{i + 1}. [{item.mainCategory || 'Genel'}] [Deneme: {item.examTitle}{item.section ? ' • ' + item.section : ''}] {item.text}</Text>
                   {item.image ? (
                     <Text style={styles.listSub}>[Görsel] {item.image}</Text>
                   ) : null}
@@ -789,4 +860,5 @@ const styles = StyleSheet.create({
   socialBtnText: { color: '#111827', fontWeight: '700' },
   topicBtn: { backgroundColor: '#111827', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, marginTop: 8 },
   topicBtnText: { color: '#fff', fontWeight: '700' },
+  examBtn: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, marginTop: 8 },
 });
