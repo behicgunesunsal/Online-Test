@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { Video } from 'expo-av';
 import {
   SafeAreaView,
   View,
@@ -130,6 +131,8 @@ export default function App() {
   const [formCorrect, setFormCorrect] = useState(0);
   const [formExplanation, setFormExplanation] = useState('');
   const [formImageUrl, setFormImageUrl] = useState('');
+  const [formExplanationImages, setFormExplanationImages] = useState(''); // satır satır URL
+  const [formExplanationVideos, setFormExplanationVideos] = useState(''); // satır satır URL (mp4/m3u8)
 
   // Stats (in-memory)
   const [stats, setStats] = useState({});
@@ -277,6 +280,19 @@ export default function App() {
     if (cleanChoices.some((c) => !c)) return 'Tüm şıkları doldurun';
     if (formCorrect < 0 || formCorrect >= cleanChoices.length) return 'Doğru şık indeksi hatalı';
     if (formImageUrl && !/^https?:\/\//i.test(formImageUrl.trim())) return 'Görsel URL http(s) olmalı';
+    // açıklama medyaları (opsiyonel)
+    const imgLines = formExplanationImages
+      .split(/\r?\n|,/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const vidLines = formExplanationVideos
+      .split(/\r?\n|,/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const badImg = imgLines.find((u) => !/^https?:\/\//i.test(u));
+    if (badImg) return 'Açıklama görsel URL http(s) olmalı';
+    const badVid = vidLines.find((u) => !/^https?:\/\//i.test(u));
+    if (badVid) return 'Açıklama video URL http(s) olmalı (ör. mp4)';
     if (!formMainCategory.trim()) return 'Ana konu gerekli';
     if (!formExamId.trim()) return 'Deneme ID gerekli';
     if (!formExamTitle.trim()) return 'Deneme başlığı gerekli';
@@ -297,6 +313,14 @@ export default function App() {
       correctIndex: formCorrect,
       explanation: formExplanation.trim(),
       image: formImageUrl.trim() || undefined,
+      explanationImages: formExplanationImages
+        .split(/\r?\n|,/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+      explanationVideos: formExplanationVideos
+        .split(/\r?\n|,/)
+        .map((s) => s.trim())
+        .filter(Boolean),
     };
     const newQ = { ...base, kind: 'exam', mainCategory: formMainCategory.trim(), examId: formExamId.trim(), examTitle: formExamTitle.trim(), section: formSection.trim() };
     setQuestions((prev) => [...prev, newQ]);
@@ -305,6 +329,8 @@ export default function App() {
     setFormCorrect(0);
     setFormExplanation('');
     setFormImageUrl('');
+    setFormExplanationImages('');
+    setFormExplanationVideos('');
     setFormMainCategory('');
     setFormExamId('');
     setFormExamTitle('');
@@ -546,6 +572,24 @@ export default function App() {
             <Image source={{ uri: formImageUrl }} style={styles.previewImage} />
           )}
 
+          <Text style={styles.inputLabel}>Açıklama Görselleri (opsiyonel)</Text>
+          <TextInput
+            placeholder="Her satıra bir URL (http/https)"
+            value={formExplanationImages}
+            onChangeText={setFormExplanationImages}
+            style={[styles.input, { minHeight: 80 }]}
+            multiline
+          />
+
+          <Text style={styles.inputLabel}>Açıklama Videoları (opsiyonel)</Text>
+          <TextInput
+            placeholder="Her satıra bir video URL (mp4/m3u8)"
+            value={formExplanationVideos}
+            onChangeText={setFormExplanationVideos}
+            style={[styles.input, { minHeight: 80 }]}
+            multiline
+          />
+
           <Text style={styles.inputLabel}>Ana Konu</Text>
           <TextInput
             placeholder="Örn. Yeterlilik / SMMM / Hukuk"
@@ -724,6 +768,27 @@ export default function App() {
                 {!!q.explanation && (
                   <Text style={styles.explainerText}>{q.explanation}</Text>
                 )}
+                {/* Explanation media */}
+                {Array.isArray(q.explanationImages) && q.explanationImages.length > 0 && (
+                  <View style={{ marginTop: 8 }}>
+                    {q.explanationImages.map((url, idx) => (
+                      <Image key={idx} source={{ uri: url }} style={styles.explainImage} />
+                    ))}
+                  </View>
+                )}
+                {Array.isArray(q.explanationVideos) && q.explanationVideos.length > 0 && (
+                  <View style={{ marginTop: 8 }}>
+                    {q.explanationVideos.map((url, idx) => (
+                      <Video
+                        key={idx}
+                        source={{ uri: url }}
+                        useNativeControls
+                        resizeMode="contain"
+                        style={styles.explainVideo}
+                      />
+                    ))}
+                  </View>
+                )}
               </View>
             )}
           </>
@@ -844,6 +909,8 @@ const styles = StyleSheet.create({
   radioActive: { borderColor: '#10B981', backgroundColor: '#10B981' },
   correctHint: { marginLeft: 8, color: '#10B981', fontWeight: '700' },
   previewImage: { width: '100%', height: 140, borderRadius: 10, marginTop: 8 },
+  explainImage: { width: '100%', height: 180, borderRadius: 10, marginTop: 8, resizeMode: 'cover' },
+  explainVideo: { width: '100%', height: 200, borderRadius: 10, backgroundColor: '#000', marginTop: 8 },
   listRow: {
     flexDirection: 'row',
     alignItems: 'center',
