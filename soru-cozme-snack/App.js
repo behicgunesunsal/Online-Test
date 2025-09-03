@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Video } from 'expo-av';
+import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   SafeAreaView,
   View,
@@ -9,6 +11,7 @@ import {
   ScrollView,
   TextInput,
   Image,
+  ImageBackground,
 } from 'react-native';
 
 const INITIAL_QUESTIONS = [
@@ -124,6 +127,93 @@ export default function App() {
 
   // Tabs after login
   const [tab, setTab] = useState('quiz'); // 'quiz' | 'admin' | 'stats'
+
+  // Splash (Açılış) ekranı ayarları
+  const [splashConfig, setSplashConfig] = useState({
+    enabled: true,
+    title: 'Soru Bankası',
+    logo: '',
+    bg: '',
+  });
+  const [sawSplash, setSawSplash] = useState(false);
+
+  // Load/save splashConfig persistently
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem('splashConfig');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          setSplashConfig((prev) => ({ ...prev, ...parsed }));
+        }
+      } catch (e) {}
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        await AsyncStorage.setItem('splashConfig', JSON.stringify(splashConfig));
+      } catch (e) {}
+    })();
+  }, [splashConfig]);
+
+  // Notifications handler (foreground)
+  useEffect(() => {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      }),
+    });
+  }, []);
+
+  const [notifMinutes, setNotifMinutes] = useState('60');
+  const [scheduledNotifId, setScheduledNotifId] = useState(null);
+
+  const requestNotifPermission = async () => {
+    const perms = await Notifications.getPermissionsAsync();
+    if (perms.status !== 'granted') {
+      const ask = await Notifications.requestPermissionsAsync();
+      if (ask.status !== 'granted') {
+        alert('Bildirim izni verilmedi.');
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const sendTestNotification = async () => {
+    const ok = await requestNotifPermission();
+    if (!ok) return;
+    await Notifications.scheduleNotificationAsync({
+      content: { title: 'Test Bildirimi', body: 'Soru Bankası bildirim testi.' },
+      trigger: null, // hemen
+    });
+  };
+
+  const scheduleReminder = async () => {
+    const ok = await requestNotifPermission();
+    if (!ok) return;
+    const mins = parseInt(notifMinutes || '0', 10);
+    if (!mins || mins <= 0) {
+      alert('Dakika değeri geçersiz.');
+      return;
+    }
+    const id = await Notifications.scheduleNotificationAsync({
+      content: { title: 'Çalışma Zamanı', body: 'Yeni bir deneme çözmeye hazır mısın?' },
+      trigger: { seconds: mins * 60 },
+    });
+    setScheduledNotifId(id);
+    alert(`Bildirim ${mins} dakika sonra planlandı.`);
+  };
+
+  const cancelScheduled = async () => {
+    await Notifications.cancelAllScheduledNotificationsAsync();
+    setScheduledNotifId(null);
+    alert('Planlı bildirim(ler) iptal edildi.');
+  };
 
   // Admin form state (only exam mode)
   const [formText, setFormText] = useState('');
@@ -349,6 +439,29 @@ export default function App() {
     alert('Soru eklendi');
   };
 
+  // SPLASH SCREEN (before auth)
+  if (!user && !sawSplash && splashConfig.enabled) {
+    return (
+      <SafeAreaView style={{ flex: 1 }}>
+        <ImageBackground
+          source={{ uri: splashConfig.bg || 'https://images.unsplash.com/photo-1529101091764-c3526daf38fe?w=1600' }}
+          style={styles.splashBg}
+          resizeMode="cover"
+        >
+          <View style={styles.splashOverlay}>
+            {!!splashConfig.logo && (
+              <Image source={{ uri: splashConfig.logo }} style={styles.splashLogo} />
+            )}
+            <Text style={styles.splashTitle}>{splashConfig.title || 'Soru Bankası'}</Text>
+            <TouchableOpacity style={styles.splashBtn} onPress={() => setSawSplash(true)}>
+              <Text style={styles.splashBtnText}>Devam Et</Text>
+            </TouchableOpacity>
+          </View>
+        </ImageBackground>
+      </SafeAreaView>
+    );
+  }
+
   // AUTH SCREEN
   if (!user) {
     return (
@@ -533,6 +646,82 @@ export default function App() {
       <SafeAreaView style={styles.container}>
         {TopNav}
         <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Açılış Ekranı (Splash)</Text>
+            <View style={[styles.modeSwitch, { alignSelf: 'flex-start', marginBottom: 8 }]}>
+              <TouchableOpacity
+                onPress={() => setSplashConfig((s) => ({ ...s, enabled: true }))}
+                style={[styles.modeBtn, splashConfig.enabled && styles.modeBtnActive]}
+              >
+                <Text style={splashConfig.enabled ? styles.modeBtnTextActive : styles.modeBtnText}>Açık</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setSplashConfig((s) => ({ ...s, enabled: false }))}
+                style={[styles.modeBtn, !splashConfig.enabled && styles.modeBtnActive]}
+              >
+                <Text style={!splashConfig.enabled ? styles.modeBtnTextActive : styles.modeBtnText}>Kapalı</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.inputLabel}>Başlık Metni</Text>
+            <TextInput
+              placeholder="Soru Bankası"
+              value={splashConfig.title}
+              onChangeText={(t) => setSplashConfig((s) => ({ ...s, title: t }))}
+              style={styles.input}
+            />
+            <Text style={styles.inputLabel}>Logo URL</Text>
+            <TextInput
+              placeholder="https://…"
+              value={splashConfig.logo}
+              onChangeText={(t) => setSplashConfig((s) => ({ ...s, logo: t }))}
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {!!splashConfig.logo && (
+              <Image source={{ uri: splashConfig.logo }} style={styles.previewImage} />
+            )}
+            <Text style={styles.inputLabel}>Arka Plan URL</Text>
+            <TextInput
+              placeholder="https://…"
+              value={splashConfig.bg}
+              onChangeText={(t) => setSplashConfig((s) => ({ ...s, bg: t }))}
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {!!splashConfig.bg && (
+              <Image source={{ uri: splashConfig.bg }} style={styles.previewImage} />
+            )}
+            {!!sawSplash ? (
+              <TouchableOpacity style={[styles.primaryBtn, { marginTop: 12 }]} onPress={() => setSawSplash(false)}>
+                <Text style={styles.primaryBtnText}>Açılışı Tekrar Göster</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Bildirimler</Text>
+            <Text style={styles.listSub}>Yerel bildirim izni iste ve test gönder.</Text>
+            <TouchableOpacity style={styles.primaryBtn} onPress={sendTestNotification}>
+              <Text style={styles.primaryBtnText}>Test Bildirimi Gönder</Text>
+            </TouchableOpacity>
+            <Text style={[styles.inputLabel, { marginTop: 12 }]}>Dakika sonra hatırlat</Text>
+            <TextInput
+              placeholder="örn. 60"
+              value={notifMinutes}
+              onChangeText={setNotifMinutes}
+              keyboardType="number-pad"
+              style={styles.input}
+            />
+            <View style={{ flexDirection: 'row', marginTop: 8 }}>
+              <TouchableOpacity style={[styles.secondaryBtn, { marginRight: 8 }]} onPress={scheduleReminder}>
+                <Text style={styles.secondaryBtnText}>Planla</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.dangerBtn, { paddingVertical: 12, paddingHorizontal: 16 }]} onPress={cancelScheduled}>
+                <Text style={styles.dangerBtnText}>İptal Et</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Yeni Deneme Sorusu Ekle</Text>
             <Text style={styles.inputLabel}>Soru Metni</Text>
@@ -942,6 +1131,13 @@ const styles = StyleSheet.create({
   previewImage: { width: '100%', height: 140, borderRadius: 10, marginTop: 8 },
   explainImage: { width: '100%', height: 180, borderRadius: 10, marginTop: 8, resizeMode: 'cover' },
   explainVideo: { width: '100%', height: 200, borderRadius: 10, backgroundColor: '#000', marginTop: 8 },
+  // Splash styles
+  splashBg: { flex: 1, justifyContent: 'center' },
+  splashOverlay: { backgroundColor: 'rgba(0,0,0,0.45)', flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  splashLogo: { width: 120, height: 120, borderRadius: 16, marginBottom: 12, backgroundColor: '#fff' },
+  splashTitle: { color: '#fff', fontSize: 28, fontWeight: '800', marginBottom: 12 },
+  splashBtn: { backgroundColor: '#111827', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 10 },
+  splashBtnText: { color: '#fff', fontWeight: '700' },
   listRow: {
     flexDirection: 'row',
     alignItems: 'center',
