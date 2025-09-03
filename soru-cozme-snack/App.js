@@ -133,6 +133,7 @@ export default function App() {
   const [formImageUrl, setFormImageUrl] = useState('');
   const [formExplanationImages, setFormExplanationImages] = useState(''); // satır satır URL
   const [formExplanationVideos, setFormExplanationVideos] = useState(''); // satır satır URL (mp4/m3u8)
+  const [formChoiceImages, setFormChoiceImages] = useState(['', '', '', '']);
 
   // Stats (in-memory)
   const [stats, setStats] = useState({});
@@ -293,6 +294,12 @@ export default function App() {
     if (badImg) return 'Açıklama görsel URL http(s) olmalı';
     const badVid = vidLines.find((u) => !/^https?:\/\//i.test(u));
     if (badVid) return 'Açıklama video URL http(s) olmalı (ör. mp4)';
+    // şık görselleri (opsiyonel)
+    const badChoiceImg = formChoiceImages
+      .map((u) => u.trim())
+      .filter(Boolean)
+      .find((u) => !/^https?:\/\//i.test(u));
+    if (badChoiceImg) return 'Şık görsel URL http(s) olmalı';
     if (!formMainCategory.trim()) return 'Ana konu gerekli';
     if (!formExamId.trim()) return 'Deneme ID gerekli';
     if (!formExamTitle.trim()) return 'Deneme başlığı gerekli';
@@ -309,7 +316,10 @@ export default function App() {
     const base = {
       id: `q_${Date.now()}`,
       text: formText.trim(),
-      choices: formChoices.map((c) => c.trim()),
+      choices: formChoices.map((c, idx) => {
+        const img = (formChoiceImages[idx] || '').trim();
+        return { text: c.trim(), image: img || undefined };
+      }),
       correctIndex: formCorrect,
       explanation: formExplanation.trim(),
       image: formImageUrl.trim() || undefined,
@@ -331,6 +341,7 @@ export default function App() {
     setFormImageUrl('');
     setFormExplanationImages('');
     setFormExplanationVideos('');
+    setFormChoiceImages(['', '', '', '']);
     setFormMainCategory('');
     setFormExamId('');
     setFormExamTitle('');
@@ -551,6 +562,21 @@ export default function App() {
               </View>
             ))}
 
+            {/* Şık görsel URL alanları */}
+            {formChoiceImages.map((img, idx) => (
+              <TextInput
+                key={`img-${idx}`}
+                placeholder={`Şık ${idx + 1} Görsel URL (opsiyonel)`}
+                value={img}
+                onChangeText={(t) =>
+                  setFormChoiceImages((prev) => prev.map((p, i) => (i === idx ? t : p)))
+                }
+                style={[styles.input, { marginTop: 6 }]}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            ))}
+
             <Text style={styles.inputLabel}>Açıklama (opsiyonel)</Text>
             <TextInput
               placeholder="Açıklama"
@@ -727,6 +753,7 @@ export default function App() {
             ) : null}
             <View style={{ marginTop: 12 }}>
               {q.choices.map((choice, i) => {
+                const choiceObj = typeof choice === 'string' ? { text: choice } : choice;
                 const isSelected = selected === i;
                 const isCorrect = i === q.correctIndex;
                 const showState = selected !== null;
@@ -754,7 +781,10 @@ export default function App() {
                     disabled={selected !== null}
                     style={[styles.choice, { backgroundColor: bg, borderColor: border }]}
                   >
-                    <Text style={[styles.choiceText, { color }]}>{choice}</Text>
+                    <Text style={[styles.choiceText, { color }]}>{choiceObj.text}</Text>
+                    {choiceObj.image ? (
+                      <Image source={{ uri: choiceObj.image }} style={styles.choiceImage} />
+                    ) : null}
                   </TouchableOpacity>
                 );
               })}
@@ -852,6 +882,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   choiceText: { fontSize: 16 },
+  choiceImage: { width: '100%', height: 140, resizeMode: 'cover', borderRadius: 8, marginTop: 6 },
   explainer: {
     marginTop: 14,
     backgroundColor: '#F3F4F6',
